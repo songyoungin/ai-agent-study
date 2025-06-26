@@ -2,18 +2,19 @@
 검색 키워드로부터 뉴스 기사를 검색하고, 기사 본문을 추출하고, 요약하는 에이전트를 생성합니다.
 
 실행 방법:
-    python web_scraping_agent.py --query "인공지능 최신 동향" --num_results 5 --num_sentences 5
+    뉴스 기사 검색 예시: python web_scraping_agent.py --query "인공지능 최신 동향" --num_results 5 --num_sentences 5
+    일상 대화 예시: python web_scraping_agent.py --query "오늘 날씨 어때?"
 
 세부 구현 사항:
     - 뉴스 기사 검색은 DuckDuckGo API를 사용합니다.
     - 기사 본문 추출은 newspaper 라이브러리를 사용합니다.
     - 요약은 OpenAI API를 사용합니다.
     - LangGraph를 사용해 에이전트를 생성합니다.
+    - 뉴스와 관련 없는 쿼리는 뉴스 검색을 하지 않습니다.
 """
 
 import argparse
-
-from typing import List
+from typing import List, Optional
 from langgraph.graph.graph import CompiledGraph
 from newspaper import Article
 from duckduckgo_search import DDGS
@@ -21,14 +22,63 @@ from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
-
-
 from dotenv import load_dotenv
 
 load_dotenv(verbose=True)
 
 # OpenAI 모델 인스턴스 생성
 llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
+
+def is_news_related_query(query: Optional[str]) -> bool:
+    """
+    쿼리가 뉴스 검색과 관련이 있는지 판단합니다.
+
+    Args:
+        query: 분석할 쿼리 문자열
+
+    Returns:
+        bool: 뉴스 검색이 필요하면 True, 아니면 False
+    """
+    if not query or not query.strip():
+        return False
+
+    prompt = f"""
+    다음 사용자 쿼리가 뉴스 기사 검색이 필요한 내용인지 판단해주세요.
+
+    사용자 쿼리: "{query}"
+
+    뉴스 검색이 필요한 경우의 예시:
+    - 최신 사건, 이슈, 동향에 대한 질문
+    - 특정 회사, 정치, 경제, 사회 소식
+    - "뉴스", "소식", "현황", "동향" 등의 키워드 포함
+
+    뉴스 검색이 불필요한 경우의 예시:
+    - 일반적인 인사말 ("안녕", "안녕하세요")
+    - 개인적인 질문이나 일상적인 대화
+    - 기술적 질문이나 학습 관련 질문
+    - 날씨, 음식 등 일반적인 정보 질문
+
+    "네" 또는 "아니오"로 시작해서 한 줄로 답변해주세요.
+    """
+
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        answer = str(response.content).strip().lower()
+
+        # "네" 또는 "yes"로 시작하면 뉴스 관련, "아니오" 또는 "no"로 시작하면 일반 질문
+        if answer.startswith("네") or answer.startswith("yes"):
+            return True
+        elif answer.startswith("아니오") or answer.startswith("no"):
+            return False
+        else:
+            # 명확하지 않은 경우 기본적으로 뉴스 검색 수행
+            return True
+
+    except Exception as e:
+        print(f"쿼리 분류 중 오류 발생: {e}")
+        # 오류 발생 시 안전하게 뉴스 검색 수행
+        return True
 
 
 def search_news_base(query: str, num_results: int = 3) -> List[str]:
@@ -134,6 +184,16 @@ def create_agent_with_params(num_results: int, num_sentences: int) -> CompiledGr
         CompiledGraph: LangGraph 에이전트
     """
 
+    # 쿼리 분류 도구 생성
+    @tool
+    def classify_query(query: str) -> str:
+        """사용자 쿼리가 뉴스 검색과 관련이 있는지 판단합니다."""
+        is_news_related = is_news_related_query(query)
+        if is_news_related:
+            return "뉴스 검색이 필요한 쿼리입니다."
+        else:
+            return "뉴스 검색이 필요하지 않은 일반적인 질문입니다."
+
     # num_results가 바인딩된 search_news 도구 생성
     @tool
     def search_news(query: str) -> List[str]:
@@ -143,7 +203,7 @@ def create_agent_with_params(num_results: int, num_sentences: int) -> CompiledGr
     # 기본 fetch_article 도구 생성
     @tool
     def fetch_article(url: str) -> str:
-        """주어진 URL의 뉴스 본문을 스크래핑합니다."""
+        """주어진 URL의 뉴스 본문을 스크래핁합니다."""
         return fetch_article_base(url)
 
     # num_sentences가 바인딩된 summarize_text 도구 생성
@@ -153,7 +213,9 @@ def create_agent_with_params(num_results: int, num_sentences: int) -> CompiledGr
         return summarize_text_base(text, num_sentences)
 
     # 바인딩된 도구들로 에이전트 생성
-    return create_react_agent(llm, tools=[search_news, fetch_article, summarize_text])
+    return create_react_agent(
+        llm, tools=[classify_query, search_news, fetch_article, summarize_text]
+    )
 
 
 if __name__ == "__main__":
@@ -171,7 +233,24 @@ if __name__ == "__main__":
     agent = create_agent_with_params(args.num_results, args.num_sentences)
 
     # 태스크 생성
-    task = f"'{args.query}' 관련 최신 뉴스를 찾아서 각 기사를 요약해줘. 검색된 모든 기사를 처리해야 해."
+    task = f"""
+    다음 사용자 쿼리를 처리해주세요: '{args.query}'
+
+    처리 순서:
+    1. 먼저 classify_query 도구를 사용해서 이 쿼리가 뉴스 검색과 관련이 있는지 판단하세요.
+
+    2. 뉴스 검색이 필요한 쿼리인 경우:
+    - search_news로 관련 뉴스 기사 URL들을 검색하세요
+    - 각 URL에 대해 fetch_article로 기사 본문을 추출하세요
+    - 각 기사를 summarize_text로 요약하세요
+    - 모든 기사의 요약을 종합해서 사용자에게 제공하세요
+
+    3. 뉴스 검색이 필요하지 않은 일반적인 질문인 경우:
+    - 뉴스 검색 도구들을 사용하지 말고, 직접 친근하게 답변하세요
+    - 예: 인사말에는 인사로 답하고, 일반적인 질문에는 도움이 되는 답변을 제공하세요
+
+    항상 한국어로 답변하세요.
+    """
 
     print(
         f"실행 설정: 검색 키워드='{args.query}', 기사 개수={args.num_results}, 요약 문장 수={args.num_sentences}"
