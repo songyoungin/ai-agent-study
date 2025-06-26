@@ -1,5 +1,4 @@
-"""
-검색 키워드로부터 뉴스 기사를 검색하고, 기사 본문을 추출하고, 요약하는 에이전트를 생성합니다.
+"""검색 키워드로부터 뉴스 기사를 검색하고, 기사 본문을 추출 후 요약하는 에이전트를 생성합니다.
 
 실행 방법:
     뉴스 기사 검색 예시: python web_scraping_agent.py --query "인공지능 최신 동향" --num_results 5 --num_sentences 5
@@ -22,12 +21,14 @@ from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from langgraph.prebuilt import create_react_agent
+from langchain_core.tracers.context import collect_runs
+from langsmith.run_trees import RunTree
 from dotenv import load_dotenv
 
 load_dotenv(verbose=True)
 
 # OpenAI 모델 인스턴스 생성
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0)
 
 
 def is_news_related_query(query: Optional[str]) -> bool:
@@ -218,6 +219,27 @@ def create_agent_with_params(num_results: int, num_sentences: int) -> CompiledGr
     )
 
 
+def print_run_tree(node: RunTree, level: int = 0) -> None:
+    """Langchain 컬렉터에 의해 수집된 run의 정보를 재귀적으로 출력합니다.
+
+    Args:
+        node: 컬렉터에 의해 수집된 실행 결과
+        level: 재귀 깊이 (기본값: 0)
+    """
+    indent = "  " * level
+    print(f"{indent}- 이름: {node.name!r}, 타입: {node.run_type}")
+
+    # 입력/출력이 있다면 출력
+    if hasattr(node, "inputs") and node.inputs is not None:
+        print(f"{indent}  inputs: {node.inputs}")
+    if hasattr(node, "outputs") and node.outputs is not None:
+        print(f"{indent}  outputs: {node.outputs}")
+
+    # 하위 호출 순회
+    for child in getattr(node, "child_runs", []):
+        print_run_tree(child, level + 1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="뉴스 기사 검색 및 요약 에이전트")
     parser.add_argument(
@@ -257,5 +279,13 @@ if __name__ == "__main__":
     )
     print("=" * 80)
 
-    result = agent.invoke({"messages": [{"role": "user", "content": task}]})
+    # 각 단계별 기록을 확인할 수 있는 인메모리 컬렉터 생성
+    with collect_runs() as collector:
+        result = agent.invoke({"messages": [{"role": "user", "content": task}]})
+
+    # 컬렉터 결과 출력
+    for tree in collector.traced_runs:
+        print_run_tree(tree)
+
+    # 최종 답변 출력
     print(result["messages"][-1].content)
