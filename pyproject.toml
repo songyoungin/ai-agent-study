@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "duckduckgo-search>=8.0.4",
     "feedparser>=6.0.11",
+    "grandalf>=0.8",
     "langchain>=0.3.26",
     "langchain-openai>=0.3.25",
     "langgraph>=0.4.9",
