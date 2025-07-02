@@ -15,7 +15,8 @@ Multi-Agent 구조로 기사 검색, 추출, 요약을 수행하는 스크립트
 """
 
 import argparse
-from typing import List, TypedDict, Any, Dict, Annotated
+from enum import StrEnum
+from typing import List, Any, Dict
 from langgraph.graph import StateGraph, END
 from langgraph.graph.graph import CompiledGraph
 from newspaper import Article
@@ -24,12 +25,36 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_core.callbacks import BaseCallbackHandler
 from dotenv import load_dotenv
-import operator
+
+from pydantic import BaseModel, ConfigDict, Field
 
 load_dotenv(verbose=True)
 
 # OpenAI 모델 인스턴스 생성
 llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0)
+
+
+class AgentNode(StrEnum):
+    """유효한 Multi-Agent 노드 이름 enum 클래스"""
+
+    supervisor = "supervisor"
+    classifier = "classifier"
+    search = "search"
+    scraper = "scraper"
+    summarizer = "summarizer"
+    response_generator = "response_generator"
+    general_chat = "general_chat"
+    finish = "finish"
+
+
+class AgentEdge(StrEnum):
+    """유효한 Multi-Agent 실행 상태 enum 클래스"""
+
+    classified = "classified"
+    searched = "searched"
+    scraped = "scraped"
+    summarized = "summarized"
+    answer_generated = "answer_generated"
 
 
 class MultiAgentDebugCallback(BaseCallbackHandler):
@@ -46,16 +71,7 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
         run_name = kwargs.get("name", "Unknown")
 
         # Multi-Agent 노드들만 추적
-        valid_nodes = [
-            "supervisor",
-            "classifier_agent",
-            "search_agent",
-            "scraper_agent",
-            "summarizer_agent",
-            "response_generator_agent",
-            "general_chat_agent",
-        ]
-        if run_name in valid_nodes:
+        if run_name in AgentNode:
             self.current_node = run_name
             self.node_count += 1
 
@@ -124,21 +140,29 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
             self.current_node = None
 
 
-class AgentState(TypedDict):
-    """
-    Multi-Agent 시스템의 공유 상태를 정의합니다.
-    """
+class AgentState(BaseModel):
+    """Multi-Agent 시스템의 공유 상태를 정의합니다."""
 
-    query: str  # 사용자 쿼리
-    messages: Annotated[List[BaseMessage], operator.add]  # Agent간 메시지 교환
-    next: str  # 다음에 실행할 Agent 이름
-    is_news_related: bool  # 뉴스 검색 필요 여부
-    news_urls: List[str]  # 검색된 뉴스 URL 목록
-    articles: List[str]  # 검색된 뉴스 본문 목록
-    summaries: List[str]  # 요약된 뉴스 본문 목록
-    final_response: str  # 최종 응답 메시지
-    num_results: int  # 검색할 뉴스 기사 개수
-    num_sentences: int  # 요약할 문장 개수
+    model_config = ConfigDict(use_enum_values=True)
+
+    query: str = Field(description="사용자 쿼리")
+    messages: List[BaseMessage] = Field(default_factory=list)
+    transition_to: AgentNode | AgentEdge | None = Field(
+        default=None, description="다음 실행 상태"
+    )
+    is_news_related: bool = Field(default=False, description="뉴스 검색 필요 여부")
+    news_urls: List[str] = Field(
+        default_factory=list, description="검색된 뉴스 URL 목록"
+    )
+    articles: List[str] = Field(
+        default_factory=list, description="검색된 뉴스 본문 목록"
+    )
+    summaries: List[str] = Field(
+        default_factory=list, description="요약된 뉴스 본문 목록"
+    )
+    final_response: str = Field(default="", description="최종 응답 메시지")
+    num_results: int = Field(default=3, ge=1, description="검색할 뉴스 기사 개수")
+    num_sentences: int = Field(default=3, ge=1, description="요약할 문장 개수")
 
 
 # =============================================================================
@@ -150,69 +174,69 @@ def supervisor_node(state: AgentState) -> AgentState:
     """Supervisor Agent가 전체 워크플로우를 조정합니다."""
 
     print(
-        f"🧭 Supervisor 상태 체크: next='{state['next']}', is_news_related={state.get('is_news_related', 'None')}"
+        f"🧭 Supervisor 상태 체크: transition_to='{state.transition_to}', is_news_related={state.is_news_related}"
     )
 
     # 초기 상태: 분류 Agent로 시작 (아직 아무것도 시작하지 않았다면)
-    if state["next"] == "":
-        state["next"] = "classifier_agent"
-        state["messages"].append(
+    if not state.transition_to:
+        state.transition_to = AgentNode.classifier
+        state.messages.append(
             AIMessage(content="🏁 워크플로우 시작: 쿼리 분류부터 시작합니다.")
         )
         return state
 
-    # 분류 완료 후 분기
-    if state["next"] == "classified":
-        if state["is_news_related"]:
-            state["next"] = "search_agent"
-            state["messages"].append(
+    # 쿼리 분류 완료 후 분류 결과(뉴스 관련 or 일반 대화)에 따라 후속 agent 분기
+    if state.transition_to == AgentEdge.classified:
+        if state.is_news_related:
+            state.transition_to = AgentNode.search
+            state.messages.append(
                 AIMessage(content="📈 뉴스 관련 쿼리 감지: 뉴스 검색을 시작합니다.")
             )
         else:
-            state["next"] = "general_chat_agent"
-            state["messages"].append(
+            state.transition_to = AgentNode.general_chat
+            state.messages.append(
                 AIMessage(content="💭 일반 대화 감지: 일반 응답을 생성합니다.")
             )
         return state
 
-    # 뉴스 검색 완료 후
-    if state["next"] == "searched":
-        state["next"] = "scraper_agent"
-        state["messages"].append(
+    # 뉴스 검색 완료 후 후속 agent를 scraper agent로 설정
+    if state.transition_to == AgentEdge.searched:
+        state.transition_to = AgentNode.scraper
+        state.messages.append(
             AIMessage(content="🔗 URL 검색 완료: 기사 본문 추출을 시작합니다.")
         )
         return state
 
-    # 스크래핑 완료 후
-    if state["next"] == "scraped":
-        state["next"] = "summarizer_agent"
-        state["messages"].append(
+    # 스크래핑 완료 후 후속 agent를 summarizer agent로 설정
+    if state.transition_to == AgentEdge.scraped:
+        state.transition_to = AgentNode.summarizer
+        state.messages.append(
             AIMessage(content="📰 본문 추출 완료: 기사 요약을 시작합니다.")
         )
         return state
 
-    # 요약 완료 후
-    if state["next"] == "summarized":
-        state["next"] = "response_generator_agent"
-        state["messages"].append(
+    # 요약 완료 후 후속 agent를 response generator agent로 설정
+    if state.transition_to == AgentEdge.summarized:
+        state.transition_to = AgentNode.response_generator
+        state.messages.append(
             AIMessage(content="📋 요약 완료: 최종 응답을 생성합니다.")
         )
         return state
 
     # 모든 작업 완료
-    if state["next"] == "completed":
-        state["next"] = "FINISH"
-        state["messages"].append(AIMessage(content="🎯 모든 작업이 완료되었습니다!"))
+    if state.transition_to == AgentEdge.answer_generated:
+        state.transition_to = AgentNode.finish
+        state.messages.append(AIMessage(content="🎯 모든 작업이 완료되었습니다!"))
         return state
 
     # 기본값: 종료
-    state["next"] = "FINISH"
+    state.transition_to = AgentNode.finish
     return state
 
 
 def classifier_agent_node(state: AgentState) -> AgentState:
     """Classifier Agent 노드"""
-    query = state["query"]
+    query = state.query
 
     prompt = f"""
     다음 사용자 쿼리가 뉴스 기사 검색이 필요한 내용인지 판단해주세요.
@@ -239,31 +263,32 @@ def classifier_agent_node(state: AgentState) -> AgentState:
 
         # "네" 또는 "yes"로 시작하면 뉴스 관련, "아니오" 또는 "no"로 시작하면 일반 질문
         if answer.startswith("네") or answer.startswith("yes"):
-            state["is_news_related"] = True
+            state.is_news_related = True
         elif answer.startswith("아니오") or answer.startswith("no"):
-            state["is_news_related"] = False
+            state.is_news_related = False
         else:
             # 명확하지 않은 경우 기본적으로 뉴스 검색 수행
-            state["is_news_related"] = True
+            state.is_news_related = True
 
     except Exception:
         # 오류 발생 시 안전하게 뉴스 검색 수행
-        state["is_news_related"] = True
+        state.is_news_related = True
 
-    state["messages"].append(
+    state.messages.append(
         AIMessage(
-            content=f"분류 결과: {'뉴스 관련' if state['is_news_related'] else '일반 대화'}"
+            content=f"분류 결과: {'뉴스 관련' if state.is_news_related else '일반 대화'}"
         )
     )
-    # 분류 완료 표시
-    state["next"] = "classified"
+
+    # 분류 완료 상태 기록
+    state.transition_to = AgentEdge.classified
     return state
 
 
 def search_agent_node(state: AgentState) -> AgentState:
     """Search Agent 노드"""
-    query = state["query"]
-    num_results = state["num_results"]
+    query = state.query
+    num_results = state.num_results
 
     print(
         f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"
@@ -283,21 +308,22 @@ def search_agent_node(state: AgentState) -> AgentState:
                 if len(urls) >= num_results:
                     break
 
-        state["news_urls"] = urls
+        state.news_urls = urls
 
     except Exception as e:
         print(f"DuckDuckGo API를 이용해 기사 검색 중 오류가 발생했습니다: {e}")
-        state["news_urls"] = []
+        state.news_urls = []
 
-    state["messages"].append(AIMessage(content=f"검색 완료: {len(urls)}개 URL 발견"))
+    state.messages.append(AIMessage(content=f"검색 완료: {len(urls)}개 URL 발견"))
+
     # 검색 완료 표시
-    state["next"] = "searched"
+    state.transition_to = AgentEdge.searched
     return state
 
 
 def scraper_agent_node(state: AgentState) -> AgentState:
     """Scraper Agent 노드"""
-    urls = state["news_urls"]
+    urls = state.news_urls
     articles: List[str] = []
 
     for url in urls:
@@ -316,19 +342,20 @@ def scraper_agent_node(state: AgentState) -> AgentState:
         except Exception as e:
             print(f"기사 추출 중 오류 발생: {str(e)}")
 
-    state["articles"] = articles
-    state["messages"].append(
+    state.articles = articles
+    state.messages.append(
         AIMessage(content=f"스크래핑 완료: {len(articles)}개 기사 추출")
     )
-    # 스크래핑 완료 표시
-    state["next"] = "scraped"
+
+    # 뉴스 기사 스크래핑 완료 표시
+    state.transition_to = AgentEdge.scraped
     return state
 
 
 def summarizer_agent_node(state: AgentState) -> AgentState:
     """Summarizer Agent 노드"""
-    articles = state["articles"]
-    num_sentences = state["num_sentences"]
+    articles = state.articles
+    num_sentences = state.num_sentences
     summaries: List[str] = []
 
     for i, text in enumerate(articles):
@@ -351,22 +378,21 @@ def summarizer_agent_node(state: AgentState) -> AgentState:
         except Exception as e:
             summaries.append(f"요약 중 오류 발생: {str(e)}")
 
-    state["summaries"] = summaries
-    state["messages"].append(
-        AIMessage(content=f"요약 완료: {len(summaries)}개 기사 요약")
-    )
-    # 요약 완료 표시
-    state["next"] = "summarized"
+    state.summaries = summaries
+    state.messages.append(AIMessage(content=f"요약 완료: {len(summaries)}개 기사 요약"))
+
+    # 뉴스 기사 요약 완료 표시
+    state.transition_to = AgentEdge.summarized
     return state
 
 
 def response_generator_agent_node(state: AgentState) -> AgentState:
     """Response Generator Agent 노드"""
-    query = state["query"]
-    summaries = state["summaries"]
+    query = state.query
+    summaries = state.summaries
 
     if not summaries:
-        state["final_response"] = f"'{query}' 관련 뉴스를 찾을 수 없었습니다."
+        state.final_response = f"'{query}' 관련 뉴스를 찾을 수 없었습니다."
         return state
 
     # 요약들을 하나의 텍스트로 결합
@@ -388,21 +414,22 @@ def response_generator_agent_node(state: AgentState) -> AgentState:
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
         if isinstance(response.content, str):
-            state["final_response"] = response.content
+            state.final_response = response.content
         else:
-            state["final_response"] = str(response.content)
+            state.final_response = str(response.content)
     except Exception as e:
-        state["final_response"] = f"최종 응답 생성 중 오류가 발생했습니다: {str(e)}"
+        state.final_response = f"최종 응답 생성 중 오류가 발생했습니다: {str(e)}"
 
-    state["messages"].append(AIMessage(content="최종 응답 생성 완료"))
+    state.messages.append(AIMessage(content="최종 응답 생성 완료"))
+
     # 응답 생성 완료 표시
-    state["next"] = "completed"
+    state.transition_to = AgentEdge.answer_generated
     return state
 
 
 def general_chat_agent_node(state: AgentState) -> AgentState:
     """General Chat Agent 노드"""
-    query = state["query"]
+    query = state.query
 
     prompt = f"""
     사용자가 다음과 같이 말했습니다: "{query}"
@@ -421,39 +448,40 @@ def general_chat_agent_node(state: AgentState) -> AgentState:
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
         if isinstance(response.content, str):
-            state["final_response"] = response.content
+            state.final_response = response.content
         else:
-            state["final_response"] = str(response.content)
+            state.final_response = str(response.content)
     except Exception as e:
-        state["final_response"] = f"응답 생성 중 오류가 발생했습니다: {str(e)}"
+        state.final_response = f"응답 생성 중 오류가 발생했습니다: {str(e)}"
 
-    state["messages"].append(AIMessage(content="일반 대화 응답 완료"))
-    # 일반 대화 완료 표시
-    state["next"] = "completed"
+    state.messages.append(AIMessage(content="일반 대화 응답 완료"))
+
+    # 일반 대화에 대한 응답 생성 완료 표시
+    state.transition_to = AgentEdge.answer_generated
     return state
 
 
 def routing_function(state: AgentState) -> str:
     """다음에 실행할 Agent를 결정하는 라우팅 함수"""
-    next_agent = state.get("next", "")
+    transition_to = state.transition_to
 
-    print(f"🔀 [ROUTING] next={next_agent}")
+    print(f"🔀 [ROUTING] transition_to={transition_to}")
 
-    if next_agent == "FINISH":
+    if transition_to == AgentNode.finish:
         return END
-    elif next_agent in [
-        "classifier_agent",
-        "search_agent",
-        "scraper_agent",
-        "summarizer_agent",
-        "response_generator_agent",
-        "general_chat_agent",
+    elif transition_to in [
+        AgentNode.classifier,
+        AgentNode.search,
+        AgentNode.scraper,
+        AgentNode.summarizer,
+        AgentNode.response_generator,
+        AgentNode.general_chat,
     ]:
-        return next_agent
+        return transition_to
     else:
         # 중간 상태들("classified", "searched", "scraped", "summarized", "completed")이나
         # 초기 상태("")는 모두 supervisor로
-        return "supervisor"
+        return AgentNode.supervisor
 
 
 def create_multiagent_graph() -> CompiledGraph:
@@ -467,42 +495,42 @@ def create_multiagent_graph() -> CompiledGraph:
     workflow = StateGraph(AgentState)
 
     # 노드 추가
-    workflow.add_node("supervisor", supervisor_node)
-    workflow.add_node("classifier_agent", classifier_agent_node)
-    workflow.add_node("search_agent", search_agent_node)
-    workflow.add_node("scraper_agent", scraper_agent_node)
-    workflow.add_node("summarizer_agent", summarizer_agent_node)
-    workflow.add_node("response_generator_agent", response_generator_agent_node)
-    workflow.add_node("general_chat_agent", general_chat_agent_node)
+    workflow.add_node(AgentNode.supervisor, supervisor_node)
+    workflow.add_node(AgentNode.classifier, classifier_agent_node)
+    workflow.add_node(AgentNode.search, search_agent_node)
+    workflow.add_node(AgentNode.scraper, scraper_agent_node)
+    workflow.add_node(AgentNode.summarizer, summarizer_agent_node)
+    workflow.add_node(AgentNode.response_generator, response_generator_agent_node)
+    workflow.add_node(AgentNode.general_chat, general_chat_agent_node)
 
     # 엣지 추가 (모든 Agent는 Supervisor를 거쳐서 라우팅)
     workflow.set_entry_point("supervisor")
 
     # Supervisor에서 각 Agent로 라우팅
     workflow.add_conditional_edges(
-        "supervisor",
+        AgentNode.supervisor,
         routing_function,
         {
-            "classifier_agent": "classifier_agent",
-            "search_agent": "search_agent",
-            "scraper_agent": "scraper_agent",
-            "summarizer_agent": "summarizer_agent",
-            "response_generator_agent": "response_generator_agent",
-            "general_chat_agent": "general_chat_agent",
+            AgentNode.classifier: AgentNode.classifier,
+            AgentNode.search: AgentNode.search,
+            AgentNode.scraper: AgentNode.scraper,
+            AgentNode.summarizer: AgentNode.summarizer,
+            AgentNode.response_generator: AgentNode.response_generator,
+            AgentNode.general_chat: AgentNode.general_chat,
             END: END,
         },
     )
 
     # 각 Agent 실행 후 다시 Supervisor로 돌아감
     for agent in [
-        "classifier_agent",
-        "search_agent",
-        "scraper_agent",
-        "summarizer_agent",
-        "response_generator_agent",
-        "general_chat_agent",
+        AgentNode.classifier,
+        AgentNode.search,
+        AgentNode.scraper,
+        AgentNode.summarizer,
+        AgentNode.response_generator,
+        AgentNode.general_chat,
     ]:
-        workflow.add_edge(agent, "supervisor")
+        workflow.add_edge(agent, AgentNode.supervisor)
 
     # 그래프 컴파일
     return workflow.compile()
@@ -570,7 +598,7 @@ if __name__ == "__main__":
     initial_state = AgentState(
         query=args.query,
         messages=[],
-        next="",
+        transition_to=None,
         is_news_related=False,
         news_urls=[],
         articles=[],
