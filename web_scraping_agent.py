@@ -221,23 +221,47 @@ def create_agent_with_params(num_results: int, num_sentences: int) -> CompiledGr
 
 def print_run_tree(node: RunTree, level: int = 0) -> None:
     """Langchain 컬렉터에 의해 수집된 run의 정보를 재귀적으로 출력합니다.
+    도구 실행(tool)과 주요 체인(chain) 실행만 출력하며, 메타데이터는 제외합니다.
 
     Args:
         node: 컬렉터에 의해 수집된 실행 결과
         level: 재귀 깊이 (기본값: 0)
     """
-    indent = "  " * level
-    print(f"{indent}- 이름: {node.name!r}, 타입: {node.run_type}")
+    # 도구 실행과 체인 실행만 출력
+    if node.run_type in ["tool", "chain"]:
+        indent = "  " * level
+        print(f"{indent}- 이름: {node.name!r}, 타입: {node.run_type}")
 
-    # 입력/출력이 있다면 출력
-    if hasattr(node, "inputs") and node.inputs is not None:
-        print(f"{indent}  inputs: {node.inputs}")
-    if hasattr(node, "outputs") and node.outputs is not None:
-        print(f"{indent}  outputs: {node.outputs}")
+        # 도구 실행인 경우 핵심 정보만 출력
+        if node.run_type == "tool":
+            if hasattr(node, "inputs") and node.inputs is not None:
+                # 도구 입력에서 핵심 파라미터만 추출
+                if isinstance(node.inputs, dict) and "input" in node.inputs:
+                    print(f"{indent}  입력: {node.inputs['input']}")
 
-    # 하위 호출 순회
-    for child in getattr(node, "child_runs", []):
-        print_run_tree(child, level + 1)
+            if hasattr(node, "outputs") and node.outputs is not None:
+                # 도구 출력에서 content만 추출
+                if isinstance(node.outputs, dict) and "output" in node.outputs:
+                    output = node.outputs["output"]
+                    if hasattr(output, "content"):
+                        print(f"{indent}  출력: {output.content}")
+
+        # 체인 실행인 경우 간소화된 정보만 출력
+        elif node.run_type == "chain":
+            if hasattr(node, "inputs") and node.inputs is not None:
+                # 입력 길이 제한 (100자)
+                inputs_str = str(node.inputs)
+                if len(inputs_str) > 100:
+                    inputs_str = inputs_str[:100] + "..."
+                print(f"{indent}  입력: {inputs_str}")
+
+        # 하위 호출 순회 (출력 조건을 만족하는 경우 레벨 증가)
+        for child in getattr(node, "child_runs", []):
+            print_run_tree(child, level + 1)
+    else:
+        # 출력하지 않지만 하위 호출은 계속 순회 (레벨 유지)
+        for child in getattr(node, "child_runs", []):
+            print_run_tree(child, level)
 
 
 if __name__ == "__main__":
