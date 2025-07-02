@@ -1,7 +1,7 @@
 [project]
 name = "ai-agent-study"
 version = "0.1.0"
-description = "Add your description here"
+description = "Example of using LangGraph for multi-agent workflow"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,6 +9,8 @@ dependencies = [
     "feedparser>=6.0.11",
     "grandalf>=0.8",
     "langchain>=0.3.26",
+    "langchain-community>=0.3.26",
+    "langchain-experimental>=0.3.4",
     "langchain-openai>=0.3.25",
     "langgraph>=0.4.9",
     "lxml[html-clean]>=5.4.0",
