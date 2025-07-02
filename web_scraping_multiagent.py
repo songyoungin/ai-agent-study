@@ -89,15 +89,45 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
             print(f"{icons.get(run_name, '⚙️')} [{run_name.upper()}] 실행 시작")
 
             # 입력 상태 출력
-            if "query" in inputs:
+            # AgentState 객체인 경우 직접 접근
+            if hasattr(inputs, "transition_to"):
+                print(f"🔄 입력 transition_to: {inputs.transition_to}")
+            elif isinstance(inputs, dict) and "transition_to" in inputs:
+                print(f"🔄 입력 transition_to: {inputs['transition_to']}")
+
+            if hasattr(inputs, "query"):
+                print(f"입력 쿼리: {inputs.query}")
+            elif isinstance(inputs, dict) and "query" in inputs:
                 print(f"입력 쿼리: {inputs['query']}")
-            if "is_news_related" in inputs:
+
+            if hasattr(inputs, "is_news_related"):
+                print(f"뉴스 관련성: {inputs.is_news_related}")
+            elif isinstance(inputs, dict) and "is_news_related" in inputs:
                 print(f"뉴스 관련성: {inputs['is_news_related']}")
-            if "news_urls" in inputs and inputs["news_urls"]:
+
+            if hasattr(inputs, "news_urls") and inputs.news_urls:
+                print(f"뉴스 URL 개수: {len(inputs.news_urls)}")
+            elif (
+                isinstance(inputs, dict)
+                and "news_urls" in inputs
+                and inputs["news_urls"]
+            ):
                 print(f"뉴스 URL 개수: {len(inputs['news_urls'])}")
-            if "articles" in inputs and inputs["articles"]:
+
+            if hasattr(inputs, "articles") and inputs.articles:
+                print(f"추출된 기사 개수: {len(inputs.articles)}")
+            elif (
+                isinstance(inputs, dict) and "articles" in inputs and inputs["articles"]
+            ):
                 print(f"추출된 기사 개수: {len(inputs['articles'])}")
-            if "summaries" in inputs and inputs["summaries"]:
+
+            if hasattr(inputs, "summaries") and inputs.summaries:
+                print(f"요약된 기사 개수: {len(inputs.summaries)}")
+            elif (
+                isinstance(inputs, dict)
+                and "summaries" in inputs
+                and inputs["summaries"]
+            ):
                 print(f"요약된 기사 개수: {len(inputs['summaries'])}")
 
     def on_chain_end(self, outputs: Dict[str, Any], **kwargs: Any) -> None:
@@ -106,17 +136,59 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
             print(f"✅ [{self.current_node.upper()}] 실행 완료")
 
             # 출력 상태 출력
-            if "next" in outputs:
+            # AgentState 객체인 경우 직접 접근
+            if hasattr(outputs, "transition_to"):
+                print(f"🔄 출력 transition_to: {outputs.transition_to}")
+            elif isinstance(outputs, dict) and "transition_to" in outputs:
+                print(f"🔄 출력 transition_to: {outputs['transition_to']}")
+
+            if hasattr(outputs, "next"):
+                print(f"다음 Agent: {outputs.next}")
+            elif isinstance(outputs, dict) and "next" in outputs:
                 print(f"다음 Agent: {outputs['next']}")
-            if "is_news_related" in outputs:
+
+            if hasattr(outputs, "is_news_related"):
+                print(f"뉴스 관련성 결과: {outputs.is_news_related}")
+            elif isinstance(outputs, dict) and "is_news_related" in outputs:
                 print(f"뉴스 관련성 결과: {outputs['is_news_related']}")
-            if "news_urls" in outputs and outputs["news_urls"]:
+
+            if hasattr(outputs, "news_urls") and outputs.news_urls:
+                print(f"검색된 URL 개수: {len(outputs.news_urls)}")
+            elif (
+                isinstance(outputs, dict)
+                and "news_urls" in outputs
+                and outputs["news_urls"]
+            ):
                 print(f"검색된 URL 개수: {len(outputs['news_urls'])}")
-            if "articles" in outputs and outputs["articles"]:
+
+            if hasattr(outputs, "articles") and outputs.articles:
+                print(f"추출된 기사 개수: {len(outputs.articles)}")
+            elif (
+                isinstance(outputs, dict)
+                and "articles" in outputs
+                and outputs["articles"]
+            ):
                 print(f"추출된 기사 개수: {len(outputs['articles'])}")
-            if "summaries" in outputs and outputs["summaries"]:
+
+            if hasattr(outputs, "summaries") and outputs.summaries:
+                print(f"요약된 기사 개수: {len(outputs.summaries)}")
+            elif (
+                isinstance(outputs, dict)
+                and "summaries" in outputs
+                and outputs["summaries"]
+            ):
                 print(f"요약된 기사 개수: {len(outputs['summaries'])}")
-            if "final_response" in outputs and outputs["final_response"]:
+
+            if hasattr(outputs, "final_response") and outputs.final_response:
+                response_len = len(outputs.final_response)
+                print(f"응답 길이: {response_len}자")
+                if response_len < 100:
+                    print(f"응답 미리보기: {outputs.final_response[:50]}...")
+            elif (
+                isinstance(outputs, dict)
+                and "final_response" in outputs
+                and outputs["final_response"]
+            ):
                 response_len = len(outputs["final_response"])
                 print(f"응답 길이: {response_len}자")
                 if response_len < 100:
