@@ -2,9 +2,14 @@
 StateGraph 조합 방식으로 기사 검색, 추출, 요약을 수행하는 스크립트입니다.
 
 실행 방법:
-    뉴스 기사 검색 예시: uv run python web_scraping_graph.py --query "인공지능 최신 동향" --num_results 5 --num_sentences 5
-    일상 대화 예시: uv run python web_scraping_graph.py --query "안녕하세요"
-    그래프 시각화: uv run python web_scraping_graph.py --visualize
+    뉴스 기사 검색 예시: uv run python web_scraping_graph.py \
+        --query "인공지능 최신 동향" \
+        --num_results 5 \
+        --num_sentences 5
+    일상 대화 예시: uv run python web_scraping_graph.py \
+        --query "안녕하세요"
+    그래프 시각화: uv run python web_scraping_graph.py \
+        --visualize
 
 세부 구현 사항:
     - LangGraph StateGraph로 전체 워크플로우 관리
@@ -13,15 +18,16 @@ StateGraph 조합 방식으로 기사 검색, 추출, 요약을 수행하는 스
 """
 
 import argparse
-from typing import List, Literal, TypedDict, Any, Dict
-from langgraph.graph import StateGraph, END
+from typing import Any, Dict, List, Literal, TypedDict
+
+from dotenv import load_dotenv
+from duckduckgo_search import DDGS
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, StateGraph
 from langgraph.graph.graph import CompiledGraph
 from newspaper import Article
-from duckduckgo_search import DDGS
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
-from langchain_core.callbacks import BaseCallbackHandler
-from dotenv import load_dotenv
 
 load_dotenv(verbose=True)
 
@@ -36,9 +42,7 @@ class StateGraphDebugCallback(BaseCallbackHandler):
         self.current_node = None
         self.node_count = 0
 
-    def on_chain_start(
-        self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any
-    ) -> None:
+    def on_chain_start(self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any) -> None:
         """체인(노드) 시작 시 호출됩니다."""
         run_name = kwargs.get("name", "Unknown")
 
@@ -201,7 +205,7 @@ def search_news_node(state: NewsScrapingState) -> NewsScrapingState:
     num_results = state["num_results"]
 
     print(
-        f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"
+        f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"  # noqa: E501
     )
 
     ddgs = DDGS()
@@ -279,9 +283,7 @@ def summarize_articles_node(state: NewsScrapingState) -> NewsScrapingState:
             summaries.append("요약할 텍스트가 없습니다.")
             continue
 
-        print(
-            f"기사 {i + 1}/{len(articles)}: LLM을 통해 뉴스 본문을 요약합니다. 요약 문장 개수: {num_sentences}개"
-        )
+        print(f"기사 {i + 1}/{len(articles)}: LLM을 통해 뉴스 본문을 요약합니다. 요약 문장 개수: {num_sentences}개")
 
         prompt = f"다음 뉴스 본문을 {num_sentences}개의 문장 이내로 한국어로 요약해 주세요:\n\n{text}\n\n요약:"
 
@@ -316,9 +318,7 @@ def generate_response_node(state: NewsScrapingState) -> NewsScrapingState:
         return state
 
     # 요약들을 하나의 텍스트로 결합
-    combined_summaries = "\n\n".join(
-        [f"기사 {i + 1}:\n{summary}" for i, summary in enumerate(summaries)]
-    )
+    combined_summaries = "\n\n".join([f"기사 {i + 1}:\n{summary}" for i, summary in enumerate(summaries)])
 
     prompt = f"""
     사용자가 "{query}"에 대해 질문했습니다.
@@ -404,9 +404,7 @@ def decide_next_step(
         return "general_response"
 
 
-def create_news_scraping_graph(
-    num_results: int = 3, num_sentences: int = 3
-) -> CompiledGraph:
+def create_news_scraping_graph(num_results: int = 3, num_sentences: int = 3) -> CompiledGraph:
     """
     뉴스 스크래핑 StateGraph를 생성합니다.
 
@@ -480,19 +478,11 @@ def visualize_graph(graph: CompiledGraph) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="StateGraph 기반 뉴스 스크래핑 에이전트"
-    )
-    parser.add_argument(
-        "--query", type=str, default="인공지능 최신 동향", help="검색할 키워드"
-    )
-    parser.add_argument(
-        "--num_results", type=int, default=3, help="검색할 뉴스 기사 개수"
-    )
+    parser = argparse.ArgumentParser(description="StateGraph 기반 뉴스 스크래핑 에이전트")
+    parser.add_argument("--query", type=str, default="인공지능 최신 동향", help="검색할 키워드")
+    parser.add_argument("--num_results", type=int, default=3, help="검색할 뉴스 기사 개수")
     parser.add_argument("--num_sentences", type=int, default=3, help="요약할 문장 개수")
-    parser.add_argument(
-        "--visualize", action="store_true", help="그래프 구조를 시각화하고 종료"
-    )
+    parser.add_argument("--visualize", action="store_true", help="그래프 구조를 시각화하고 종료")
     args = parser.parse_args()
 
     # StateGraph 생성
@@ -516,9 +506,7 @@ if __name__ == "__main__":
         num_sentences=args.num_sentences,
     )
 
-    print(
-        f"실행 설정: 검색 키워드='{args.query}', 기사 개수={args.num_results}, 요약 문장 수={args.num_sentences}"
-    )
+    print(f"실행 설정: 검색 키워드='{args.query}', 기사 개수={args.num_results}, 요약 문장 수={args.num_sentences}")
     print("=" * 80)
 
     # callback handler 생성

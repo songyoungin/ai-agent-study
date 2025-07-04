@@ -2,9 +2,14 @@
 Multi-Agent 구조로 기사 검색, 추출, 요약을 수행하는 스크립트입니다.
 
 실행 방법:
-    뉴스 기사 검색 예시: uv run python web_scraping_multiagent.py --query "인공지능 최신 동향" --num_results 5 --num_sentences 5
-    일상 대화 예시: uv run python web_scraping_multiagent.py --query "안녕하세요"
-    그래프 시각화: uv run python web_scraping_multiagent.py --visualize
+    뉴스 기사 검색 예시: uv run python web_scraping_multiagent.py \
+        --query "인공지능 최신 동향" \
+        --num_results 5 \
+        --num_sentences 5
+    일상 대화 예시: uv run python web_scraping_multiagent.py \
+        --query "안녕하세요"
+    그래프 시각화: uv run python web_scraping_multiagent.py \
+        --visualize
 
 세부 구현 사항:
     - LangGraph StateGraph + Multi-Agent 시스템
@@ -16,16 +21,16 @@ Multi-Agent 구조로 기사 검색, 추출, 요약을 수행하는 스크립트
 
 import argparse
 from enum import StrEnum
-from typing import List, Any, Dict
-from langgraph.graph import StateGraph, END
+from typing import Any, Dict, List
+
+from dotenv import load_dotenv
+from duckduckgo_search import DDGS
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, StateGraph
 from langgraph.graph.graph import CompiledGraph
 from newspaper import Article
-from duckduckgo_search import DDGS
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_core.callbacks import BaseCallbackHandler
-from dotenv import load_dotenv
-
 from pydantic import BaseModel, ConfigDict, Field
 
 load_dotenv(verbose=True)
@@ -64,9 +69,7 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
         self.current_node = None
         self.node_count = 0
 
-    def on_chain_start(
-        self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any
-    ) -> None:
+    def on_chain_start(self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any) -> None:
         """체인(노드) 시작 시 호출됩니다."""
         run_name = kwargs.get("name", "Unknown")
 
@@ -107,27 +110,17 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
 
             if hasattr(inputs, "news_urls") and inputs.news_urls:
                 print(f"뉴스 URL 개수: {len(inputs.news_urls)}")
-            elif (
-                isinstance(inputs, dict)
-                and "news_urls" in inputs
-                and inputs["news_urls"]
-            ):
+            elif isinstance(inputs, dict) and "news_urls" in inputs and inputs["news_urls"]:
                 print(f"뉴스 URL 개수: {len(inputs['news_urls'])}")
 
             if hasattr(inputs, "articles") and inputs.articles:
                 print(f"추출된 기사 개수: {len(inputs.articles)}")
-            elif (
-                isinstance(inputs, dict) and "articles" in inputs and inputs["articles"]
-            ):
+            elif isinstance(inputs, dict) and "articles" in inputs and inputs["articles"]:
                 print(f"추출된 기사 개수: {len(inputs['articles'])}")
 
             if hasattr(inputs, "summaries") and inputs.summaries:
                 print(f"요약된 기사 개수: {len(inputs.summaries)}")
-            elif (
-                isinstance(inputs, dict)
-                and "summaries" in inputs
-                and inputs["summaries"]
-            ):
+            elif isinstance(inputs, dict) and "summaries" in inputs and inputs["summaries"]:
                 print(f"요약된 기사 개수: {len(inputs['summaries'])}")
 
     def on_chain_end(self, outputs: Dict[str, Any], **kwargs: Any) -> None:
@@ -154,29 +147,17 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
 
             if hasattr(outputs, "news_urls") and outputs.news_urls:
                 print(f"검색된 URL 개수: {len(outputs.news_urls)}")
-            elif (
-                isinstance(outputs, dict)
-                and "news_urls" in outputs
-                and outputs["news_urls"]
-            ):
+            elif isinstance(outputs, dict) and "news_urls" in outputs and outputs["news_urls"]:
                 print(f"검색된 URL 개수: {len(outputs['news_urls'])}")
 
             if hasattr(outputs, "articles") and outputs.articles:
                 print(f"추출된 기사 개수: {len(outputs.articles)}")
-            elif (
-                isinstance(outputs, dict)
-                and "articles" in outputs
-                and outputs["articles"]
-            ):
+            elif isinstance(outputs, dict) and "articles" in outputs and outputs["articles"]:
                 print(f"추출된 기사 개수: {len(outputs['articles'])}")
 
             if hasattr(outputs, "summaries") and outputs.summaries:
                 print(f"요약된 기사 개수: {len(outputs.summaries)}")
-            elif (
-                isinstance(outputs, dict)
-                and "summaries" in outputs
-                and outputs["summaries"]
-            ):
+            elif isinstance(outputs, dict) and "summaries" in outputs and outputs["summaries"]:
                 print(f"요약된 기사 개수: {len(outputs['summaries'])}")
 
             if hasattr(outputs, "final_response") and outputs.final_response:
@@ -184,11 +165,7 @@ class MultiAgentDebugCallback(BaseCallbackHandler):
                 print(f"응답 길이: {response_len}자")
                 if response_len < 100:
                     print(f"응답 미리보기: {outputs.final_response[:50]}...")
-            elif (
-                isinstance(outputs, dict)
-                and "final_response" in outputs
-                and outputs["final_response"]
-            ):
+            elif isinstance(outputs, dict) and "final_response" in outputs and outputs["final_response"]:
                 response_len = len(outputs["final_response"])
                 print(f"응답 길이: {response_len}자")
                 if response_len < 100:
@@ -219,19 +196,11 @@ class AgentState(BaseModel):
 
     query: str = Field(description="사용자 쿼리")
     messages: List[BaseMessage] = Field(default_factory=list)
-    transition_to: AgentNode | AgentEdge | None = Field(
-        default=None, description="다음 실행 상태"
-    )
+    transition_to: AgentNode | AgentEdge | None = Field(default=None, description="다음 실행 상태")
     is_news_related: bool = Field(default=False, description="뉴스 검색 필요 여부")
-    news_urls: List[str] = Field(
-        default_factory=list, description="검색된 뉴스 URL 목록"
-    )
-    articles: List[str] = Field(
-        default_factory=list, description="검색된 뉴스 본문 목록"
-    )
-    summaries: List[str] = Field(
-        default_factory=list, description="요약된 뉴스 본문 목록"
-    )
+    news_urls: List[str] = Field(default_factory=list, description="검색된 뉴스 URL 목록")
+    articles: List[str] = Field(default_factory=list, description="검색된 뉴스 본문 목록")
+    summaries: List[str] = Field(default_factory=list, description="요약된 뉴스 본문 목록")
     final_response: str = Field(default="", description="최종 응답 메시지")
     num_results: int = Field(default=3, ge=1, description="검색할 뉴스 기사 개수")
     num_sentences: int = Field(default=3, ge=1, description="요약할 문장 개수")
@@ -245,54 +214,40 @@ class AgentState(BaseModel):
 def supervisor_node(state: AgentState) -> AgentState:
     """Supervisor Agent가 전체 워크플로우를 조정합니다."""
 
-    print(
-        f"🧭 Supervisor 상태 체크: transition_to='{state.transition_to}', is_news_related={state.is_news_related}"
-    )
+    print(f"🧭 Supervisor 상태 체크: transition_to='{state.transition_to}', is_news_related={state.is_news_related}")
 
     # 초기 상태: 분류 Agent로 시작 (아직 아무것도 시작하지 않았다면)
     if not state.transition_to:
         state.transition_to = AgentNode.classifier
-        state.messages.append(
-            AIMessage(content="🏁 워크플로우 시작: 쿼리 분류부터 시작합니다.")
-        )
+        state.messages.append(AIMessage(content="🏁 워크플로우 시작: 쿼리 분류부터 시작합니다."))
         return state
 
     # 쿼리 분류 완료 후 분류 결과(뉴스 관련 or 일반 대화)에 따라 후속 agent 분기
     if state.transition_to == AgentEdge.classified:
         if state.is_news_related:
             state.transition_to = AgentNode.search
-            state.messages.append(
-                AIMessage(content="📈 뉴스 관련 쿼리 감지: 뉴스 검색을 시작합니다.")
-            )
+            state.messages.append(AIMessage(content="📈 뉴스 관련 쿼리 감지: 뉴스 검색을 시작합니다."))
         else:
             state.transition_to = AgentNode.general_chat
-            state.messages.append(
-                AIMessage(content="💭 일반 대화 감지: 일반 응답을 생성합니다.")
-            )
+            state.messages.append(AIMessage(content="💭 일반 대화 감지: 일반 응답을 생성합니다."))
         return state
 
     # 뉴스 검색 완료 후 후속 agent를 scraper agent로 설정
     if state.transition_to == AgentEdge.searched:
         state.transition_to = AgentNode.scraper
-        state.messages.append(
-            AIMessage(content="🔗 URL 검색 완료: 기사 본문 추출을 시작합니다.")
-        )
+        state.messages.append(AIMessage(content="🔗 URL 검색 완료: 기사 본문 추출을 시작합니다."))
         return state
 
     # 스크래핑 완료 후 후속 agent를 summarizer agent로 설정
     if state.transition_to == AgentEdge.scraped:
         state.transition_to = AgentNode.summarizer
-        state.messages.append(
-            AIMessage(content="📰 본문 추출 완료: 기사 요약을 시작합니다.")
-        )
+        state.messages.append(AIMessage(content="📰 본문 추출 완료: 기사 요약을 시작합니다."))
         return state
 
     # 요약 완료 후 후속 agent를 response generator agent로 설정
     if state.transition_to == AgentEdge.summarized:
         state.transition_to = AgentNode.response_generator
-        state.messages.append(
-            AIMessage(content="📋 요약 완료: 최종 응답을 생성합니다.")
-        )
+        state.messages.append(AIMessage(content="📋 요약 완료: 최종 응답을 생성합니다."))
         return state
 
     # 모든 작업 완료
@@ -346,11 +301,7 @@ def classifier_agent_node(state: AgentState) -> AgentState:
         # 오류 발생 시 안전하게 뉴스 검색 수행
         state.is_news_related = True
 
-    state.messages.append(
-        AIMessage(
-            content=f"분류 결과: {'뉴스 관련' if state.is_news_related else '일반 대화'}"
-        )
-    )
+    state.messages.append(AIMessage(content=f"분류 결과: {'뉴스 관련' if state.is_news_related else '일반 대화'}"))
 
     # 분류 완료 상태 기록
     state.transition_to = AgentEdge.classified
@@ -363,7 +314,7 @@ def search_agent_node(state: AgentState) -> AgentState:
     num_results = state.num_results
 
     print(
-        f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"
+        f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"  # noqa: E501
     )
 
     ddgs = DDGS()
@@ -415,9 +366,7 @@ def scraper_agent_node(state: AgentState) -> AgentState:
             print(f"기사 추출 중 오류 발생: {str(e)}")
 
     state.articles = articles
-    state.messages.append(
-        AIMessage(content=f"스크래핑 완료: {len(articles)}개 기사 추출")
-    )
+    state.messages.append(AIMessage(content=f"스크래핑 완료: {len(articles)}개 기사 추출"))
 
     # 뉴스 기사 스크래핑 완료 표시
     state.transition_to = AgentEdge.scraped
@@ -435,9 +384,7 @@ def summarizer_agent_node(state: AgentState) -> AgentState:
             summaries.append("요약할 텍스트가 없습니다.")
             continue
 
-        print(
-            f"기사 {i + 1}/{len(articles)}: LLM을 통해 뉴스 본문을 요약합니다. 요약 문장 개수: {num_sentences}개"
-        )
+        print(f"기사 {i + 1}/{len(articles)}: LLM을 통해 뉴스 본문을 요약합니다. 요약 문장 개수: {num_sentences}개")
 
         prompt = f"다음 뉴스 본문을 {num_sentences}개의 문장 이내로 한국어로 요약해 주세요:\n\n{text}\n\n요약:"
 
@@ -468,9 +415,7 @@ def response_generator_agent_node(state: AgentState) -> AgentState:
         return state
 
     # 요약들을 하나의 텍스트로 결합
-    combined_summaries = "\n\n".join(
-        [f"기사 {i + 1}:\n{summary}" for i, summary in enumerate(summaries)]
-    )
+    combined_summaries = "\n\n".join([f"기사 {i + 1}:\n{summary}" for i, summary in enumerate(summaries)])
 
     prompt = f"""
     사용자가 "{query}"에 대해 질문했습니다.
@@ -642,19 +587,11 @@ def visualize_graph(graph: CompiledGraph) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Multi-Agent 기반 뉴스 스크래핑 시스템"
-    )
-    parser.add_argument(
-        "--query", type=str, default="인공지능 최신 동향", help="검색할 키워드"
-    )
-    parser.add_argument(
-        "--num_results", type=int, default=3, help="검색할 뉴스 기사 개수"
-    )
+    parser = argparse.ArgumentParser(description="Multi-Agent 기반 뉴스 스크래핑 시스템")
+    parser.add_argument("--query", type=str, default="인공지능 최신 동향", help="검색할 키워드")
+    parser.add_argument("--num_results", type=int, default=3, help="검색할 뉴스 기사 개수")
     parser.add_argument("--num_sentences", type=int, default=3, help="요약할 문장 개수")
-    parser.add_argument(
-        "--visualize", action="store_true", help="그래프 구조를 시각화하고 종료"
-    )
+    parser.add_argument("--visualize", action="store_true", help="그래프 구조를 시각화하고 종료")
     args = parser.parse_args()
 
     # Multi-Agent StateGraph 생성
@@ -681,9 +618,7 @@ if __name__ == "__main__":
     )
 
     print("🚀 Multi-Agent 시스템 실행")
-    print(
-        f"검색 키워드: '{args.query}', 기사 개수: {args.num_results}, 요약 문장 수: {args.num_sentences}"
-    )
+    print(f"검색 키워드: '{args.query}', 기사 개수: {args.num_results}, 요약 문장 수: {args.num_sentences}")
     print("=" * 80)
 
     # callback handler 생성

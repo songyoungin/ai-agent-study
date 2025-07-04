@@ -11,18 +11,29 @@ repos:
       # Run the formatter
       - id: ruff-format
 
-  # Black - Python code formatter
-  - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 25.1.0
-    hooks:
-      - id: black
-        language_version: python3
-
   # Mypy - Static type checker
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.16.1
     hooks:
       - id: mypy
+        additional_dependencies: [
+          mypy,
+          types-requests,
+          types-PyYAML,
+          torch,
+          transformers
+        ]
+        args: [--ignore-missing-imports, --no-strict-optional]
+
+  # nbqa - Quality assurance for Jupyter notebooks
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.9.1
+    hooks:
+      # Apply ruff linting to notebooks (with ignore for notebook-specific issues)
+      - id: nbqa-ruff
+        args: ["--fix", "--ignore=E402,F401,E703"]
+      # Apply mypy type checking to notebooks (relaxed for notebooks)
+      - id: nbqa-mypy
         additional_dependencies: [
           mypy,
           types-requests,
@@ -49,3 +60,11 @@ repos:
       # Check for large files
       - id: check-added-large-files
         args: ['--maxkb=1000']
+
+  # Jupyter notebook specific hooks
+  - repo: https://github.com/srstevenson/nb-clean
+    rev: 3.3.0
+    hooks:
+      # Clean notebook outputs and metadata
+      - id: nb-clean
+        args: [--remove-empty-cells, --preserve-cell-outputs]

@@ -14,16 +14,17 @@
 
 import argparse
 from typing import List, Optional
-from langgraph.graph.graph import CompiledGraph
-from newspaper import Article
-from duckduckgo_search import DDGS
-from langchain_openai import ChatOpenAI
-from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
-from langchain_core.tracers.context import collect_runs
-from langsmith.run_trees import RunTree
+
 from dotenv import load_dotenv
+from duckduckgo_search import DDGS
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
+from langchain_core.tracers.context import collect_runs
+from langchain_openai import ChatOpenAI
+from langgraph.graph.graph import CompiledGraph
+from langgraph.prebuilt import create_react_agent
+from langsmith.run_trees import RunTree
+from newspaper import Article
 
 load_dotenv(verbose=True)
 
@@ -94,7 +95,7 @@ def search_news_base(query: str, num_results: int = 3) -> List[str]:
         List[str]: 검색된 URL 리스트
     """
     print(
-        f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"
+        f"검색 키워드: [{query}]에 대해 DuckDuckGo API를 이용해 기사 검색을 시작합니다. 최대 검색 결과: {num_results}개"  # noqa: E501
     )
 
     ddgs = DDGS()
@@ -214,9 +215,7 @@ def create_agent_with_params(num_results: int, num_sentences: int) -> CompiledGr
         return summarize_text_base(text, num_sentences)
 
     # 바인딩된 도구들로 에이전트 생성
-    return create_react_agent(
-        llm, tools=[classify_query, search_news, fetch_article, summarize_text]
-    )
+    return create_react_agent(llm, tools=[classify_query, search_news, fetch_article, summarize_text])
 
 
 def print_run_tree(node: RunTree, level: int = 0) -> None:
@@ -266,12 +265,8 @@ def print_run_tree(node: RunTree, level: int = 0) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="뉴스 기사 검색 및 요약 에이전트")
-    parser.add_argument(
-        "--query", type=str, default="인공지능 최신 동향", help="검색할 키워드"
-    )
-    parser.add_argument(
-        "--num_results", type=int, default=3, help="검색할 뉴스 기사 개수"
-    )
+    parser.add_argument("--query", type=str, default="인공지능 최신 동향", help="검색할 키워드")
+    parser.add_argument("--num_results", type=int, default=3, help="검색할 뉴스 기사 개수")
     parser.add_argument("--num_sentences", type=int, default=3, help="요약할 문장 개수")
     args = parser.parse_args()
 
@@ -298,9 +293,7 @@ if __name__ == "__main__":
     항상 한국어로 답변하세요.
     """
 
-    print(
-        f"실행 설정: 검색 키워드='{args.query}', 기사 개수={args.num_results}, 요약 문장 수={args.num_sentences}"
-    )
+    print(f"실행 설정: 검색 키워드='{args.query}', 기사 개수={args.num_results}, 요약 문장 수={args.num_sentences}")
     print("=" * 80)
 
     # 각 단계별 기록을 확인할 수 있는 인메모리 컬렉터 생성
